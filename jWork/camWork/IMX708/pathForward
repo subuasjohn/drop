@@ -1,0 +1,9 @@
+video_receiver
+
+f'rtspsrc location={self.rtsp_url} protocols=udp latency=100 ! ...'
+
+->
+
+f'udpsrc port=5600 caps="application/x-rtp, encoding-name=H264, payload=96" ! '
+f'rtph264depay ! h264parse ! avdec_h264 ! videoconvert ! '
+f'video/x-raw, format=BGR ! appsink name=appsink sync=false max-buffers=100 drop=false'

@@ -1,0 +1,6 @@
+gst-launch-1.0 -v nvarguscamerasrc \
+  ! 'video/x-raw(memory:NVMM),width=640,height=480,framerate=30/1,format=NV12' \
+  ! nvv4l2h264enc insert-sps-pps=true idrinterval=30 bitrate=8000000 \
+  ! h264parse \
+  ! rtph264pay config-interval=1 pt=96 \
+  ! udpsink host=127.0.0.1 port=5000

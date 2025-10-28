@@ -1,0 +1,11 @@
+## Originally 640x480
+## We have used:
+1920x1028
+1280x728
+
+gst-launch-1.0 -v nvarguscamerasrc \
+  ! 'video/x-raw(memory:NVMM), width=640, height=480, framerate=30/1, format=NV12' \
+  ! nvv4l2h264enc bitrate=8000000 insert-sps-pps=true idrinterval=30 \
+  ! h264parse \
+  ! rtph264pay config-interval=1 pt=96 \
+  ! udpsink host=192.168.100.101 port=5600

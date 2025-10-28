@@ -1,0 +1,1 @@
+awk '!/^#/ && NF>=4 { print $3, $4 }' <the param you provided>

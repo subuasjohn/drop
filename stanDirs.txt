@@ -1,0 +1,77 @@
+## Testing the ROS src
+Depending on a system layout a virtual environment may be required.  `ros2_ws/postBuild.sh` was created to handle keeping the source code clean while allowing a user to quickly add, update or remove shebangs as needed for Python purposes.
+
+If you are using this outside of a virtual environment you can disregard the postBuild.sh portion of these instructions:
+```
+cd ~/companion/ros2_ws
+colcon build --symlink-install --event-handlers console_direct+ --parallel-workers $(( $(nproc) * 75 / 100 )) 2>&1 | tee build.log
+bash ./postBuild.sh
+```
+
+## Other Python dependencies
+```
+python3 -m pip install --upgrade pip wheel
+pip install pipdeptree==2.2.0 numpy==1.23.5 pymavlink==2.4.48 transforms3d pygeodesy geographiclib pygame tqdm
+python3 -m pip install setuptools==65.5.1
+```
+
+## Final pips
+pymavlink==2.4.17 was previously seen as the way to go but for source matching we now pair to mavproxy
+```
+python3 -m pip install setuptools==65.5.1
+pip install numpy==1.23.5
+pip3 install --user --no-cache-dir "pymavlink==2.4.40" "MAVProxy==1.8.17"
+```
+
+After making any changes to `ardupilot` remember to:
+```
+cd ~/ardupilot
+./waf configure --board sitl
+./waf copter
+```
+
+Build the plugin
+
+```
+cd ~/ardupilot_gazebo
+mkdir build && cd build
+cmake .. -DCMAKE_BUILD_TYPE=RelWithDebInfo
+make -j4
+```
+
+Open a shell for Gazebo and do:
+```
+export PATH=/home/$(whoami)/ardupilot/Tools/autotest:$PATH
+source ~/ardupilot/Tools/completion/completion.bash
+export GZ_VERSION=harmonic
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$HOME/ardupilot_gazebo/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}
+export GZ_SIM_RESOURCE_PATH=$HOME/ardupilot_gazebo/models:$HOME/ardupilot_gazebo/worlds:${GZ_SIM_RESOURCE_PATH}
+cd ~
+gz sim -v4 -r iris_runway.sdf
+```
+
+After Gazbeo renders the vehicle open a shell for SITL:
+```
+export PATH=/home/$(whoami)/ardupilot/Tools/autotest:$PATH
+source ~/ardupilot/Tools/completion/completion.bash
+export GZ_VERSION=harmonic
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$HOME/ardupilot_gazebo/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}
+export GZ_SIM_RESOURCE_PATH=$HOME/ardupilot_gazebo/models:$HOME/ardupilot_gazebo/worlds:${GZ_SIM_RESOURCE_PATH}
+cd ~/ardupilot
+Tools/autotest/sim_vehicle.py -v ArduCopter -f gazebo-iris --model JSON --console --out 127.0.0.1:14550 --out=tcpin:0.0.0.0:20000 --out=tcpin:0.0.0.0:20001 --out=tcpin:0.0.0.0:20002 --out=tcpin:0.0.0.0:20003 --mavproxy-args="--source-system=101"
+
+Tools/autotest/sim_vehicle.py -v ArduCopter --console --out 127.0.0.1:14550 --out=tcpin:0.0.0.0:20000 --out=tcpin:0.0.0.0:20001 --out=tcpin:0.0.0.0:20002 --out=tcpin:0.0.0.0:20003 --mavproxy-args="--source-system=101"
+```
+
+## GPS Data
+```
+source ~/Desktop/stanWork/ros2_ws/install/setup.bash
+ros2 run gps_publisher here3_gps_node --ros-args -p simulate:=false -p mavproxy_ip:=192.168.1.122 -p mavproxy_port:=20000
+```
+
+
+## Replay
+ros2 run oculus_replay_node oculus_file_reader_node --ros-args -p file_path:=/home/dev/Desktop/example.oculus
+
+## Sigma
+ros2 run sonar_annotate_ui web_server_node --ros-args -p sigma_enabled:=True

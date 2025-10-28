@@ -1,0 +1,3 @@
+gst-launch-1.0 rtspsrc location=rtsp://<jetson-ip>:8554/cam latency=100 ! decodebin ! autovideosink
+-or
+vlc rtsp://<jetson-ip>:8554/cam

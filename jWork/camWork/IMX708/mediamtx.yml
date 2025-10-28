@@ -1,0 +1,3 @@
+paths:
+  cam:
+    source: udp://:5000

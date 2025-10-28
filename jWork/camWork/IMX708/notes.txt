@@ -1,0 +1,6 @@
+## Success on 708 for livestream:
+gst-launch-1.0 nvarguscamerasrc ! nvvidconv ! nv3dsink
+-or
+gst-launch-1.0 nvarguscamerasrc ! nvvidconv ! autovideosink
+
+
