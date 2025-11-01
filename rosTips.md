@@ -1,3 +1,7 @@
+## mavros usage
+udp://[local_host][:local_port]@[remote_host][:remote_port]
+
+
 ## Converting Marco and Chris
 awk '!/^#/ && NF>=4 { print $3, $4 }' <param file> > export.param
 
