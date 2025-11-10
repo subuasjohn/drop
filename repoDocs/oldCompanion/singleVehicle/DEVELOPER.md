@@ -332,9 +332,9 @@ pip3 install --user --no-cache-dir "pymavlink==2.4.40" "MAVProxy==1.8.17"
 ```
 
 ## Sands ENV
-After making any changes to `internal-sim` remember to:
+After making any changes to `sim` remember to:
 ```
-cd ~/internal-sim
+cd ~/sim
 cd gazebo_plugin
 mkdir build
 cd build

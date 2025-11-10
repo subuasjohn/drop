@@ -11,8 +11,8 @@ echo -ne "\033]0;Gazebo\007"
 export PATH=/home/dev/nvac/Tools/autotest:$PATH
 source ~/nvac/Tools/completion/completion.bash
 export GZ_VERSION=harmonic
-export GZ_SIM_SYSTEM_PLUGIN_PATH=$HOME/internal-sim/gazebo_plugin/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}
-export GZ_SIM_RESOURCE_PATH=$HOME/internal-sim/gazebo_plugin/models:$HOME/internal-sim/gazebo_plugin/worlds:${GZ_SIM_RESOURCE_PATH}
+export GZ_SIM_SYSTEM_PLUGIN_PATH=$HOME/sim/gazebo_plugin/build:${GZ_SIM_SYSTEM_PLUGIN_PATH}
+export GZ_SIM_RESOURCE_PATH=$HOME/sim/gazebo_plugin/models:$HOME/sim/gazebo_plugin/worlds:${GZ_SIM_RESOURCE_PATH}
 cd ~
 gz sim -v4 -r custom_world.sdf
 exec bash
@@ -60,6 +60,7 @@ cat > "$script5" <<'EOF'
 echo -ne "\033]0;Mavros\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
+source ~/repos/mavros/install/setup.bash
 ros2 launch mavros node.launch fcu_url:=udp://:14555@:14555 gcs_url:="\"\"" namespace:=/mavros/uas1 tgt_system:=1 tgt_component:=1 respawn_mavros:=true config_yaml:=/home/dev/internal-fw-companion-ros2/ros2_ws/src/sands/config/naviator_config.yaml pluginlists_yaml:=/home/dev/internal-fw-companion-ros2/ros2_ws/src/sands/config/naviator_pluginlists.yaml
 exec bash
 EOF
@@ -71,6 +72,7 @@ cat > "$script6" <<'EOF'
 echo -ne "\033]0;control_status\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
+source ~/repos/mavros/install/setup.bash
 ros2 run sands control_status
 exec bash
 EOF
@@ -82,6 +84,7 @@ cat > "$script7" <<'EOF'
 echo -ne "\033]0;control_data\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
+source ~/repos/mavros/install/setup.bash
 ros2 run sands control_data
 exec bash
 EOF
@@ -94,6 +97,7 @@ echo -ne "\033]0;video_receiver\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
 export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+source ~/repos/mavros/install/setup.bash
 ros2 run video_receiver receive_rtsp_gst --ros-args -p rtsp_url:=rtsp://127.0.0.1:8554/down_camera -p output_topic:=image
 exec bash
 EOF
@@ -105,6 +109,7 @@ cat > "$script9" <<'EOF'
 echo -ne "\033]0;detector\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
+source ~/repos/mavros/install/setup.bash
 ros2 run detector detect --ros-args -p input_topic:=/video_receiver/image -p detection_type:=color
 exec bash
 EOF
@@ -116,6 +121,7 @@ cat > "$script10" <<'EOF'
 echo -ne "\033]0;control_node\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
+source ~/repos/mavros/install/setup.bash
 ros2 run sands control_node
 exec bash
 EOF
@@ -127,6 +133,7 @@ cat > "$script11" <<'EOF'
 echo -ne "\033]0;ROS2 CLI\007"
 source ~/companion/ros2_ws/install/setup.bash
 # source ~/testEnv/bin/activate
+source ~/repos/mavros/install/setup.bash
 exec bash
 EOF
 
