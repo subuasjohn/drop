@@ -1,0 +1,1159 @@
+diff --git a/ArduCopter/APM_Config.h b/ArduCopter/APM_Config.h
+index 7f1ecabb7f..14d5b536f9 100644
+--- a/ArduCopter/APM_Config.h
++++ b/ArduCopter/APM_Config.h
+@@ -34,13 +34,14 @@
+ 
+ // User Hooks : For User Developed code that you wish to run
+ // Put your variable definitions into the UserVariables.h file (or another file name and then change the #define below).
+-//#define USERHOOK_VARIABLES "UserVariables.h"
++#define USERHOOK_VARIABLES "UserVariables.h"
+ // Put your custom code into the UserCode.cpp with function names matching those listed below and ensure the appropriate #define below is uncommented below
+ //#define USERHOOK_INIT userhook_init();                      // for code to be run once at startup
+-//#define USERHOOK_FASTLOOP userhook_FastLoop();            // for code to be run at 100hz
++
++#define USERHOOK_FASTLOOP userhook_FastLoop();            // for code to be run at 100hz
+ //#define USERHOOK_50HZLOOP userhook_50Hz();                  // for code to be run at 50hz
+-//#define USERHOOK_MEDIUMLOOP userhook_MediumLoop();        // for code to be run at 10hz
++#define USERHOOK_MEDIUMLOOP userhook_MediumLoop();        // for code to be run at 10hz
+ //#define USERHOOK_SLOWLOOP userhook_SlowLoop();            // for code to be run at 3.3hz
+-//#define USERHOOK_SUPERSLOWLOOP userhook_SuperSlowLoop();  // for code to be run at 1hz
++#define USERHOOK_SUPERSLOWLOOP userhook_SuperSlowLoop();  // for code to be run at 1hz
+ //#define USERHOOK_AUXSWITCH 1                        // for code to handle user aux switches
+ //#define USER_PARAMS_ENABLED 1                       // to enable user parameters
+diff --git a/ArduCopter/GCS_Mavlink.cpp b/ArduCopter/GCS_Mavlink.cpp
+index d64a8b0071..3f267e5ddd 100644
+--- a/ArduCopter/GCS_Mavlink.cpp
++++ b/ArduCopter/GCS_Mavlink.cpp
+@@ -153,6 +153,12 @@ void GCS_MAVLINK_Copter::send_position_target_local_ned()
+     uint16_t type_mask = 0;
+ 
+     switch (guided_mode) {
++    #if AP_SIM_STOCK_SITL_ENABLED
++    // naviator add dive and guided here
++    // case ModeGuided::SubMode::Dive:
++    // case ModeGuided::SubMode::Surface:
++    #endif
++
+     case ModeGuided::SubMode::Angle:
+     case ModeGuided::SubMode::EulerAngleRollPitchEulerRateYaw:
+         // we don't have a local target when in angle mode
+@@ -750,6 +756,12 @@ MAV_RESULT GCS_MAVLINK_Copter::handle_command_int_do_reposition(const mavlink_co
+         }
+     }
+ 
++    #if AP_SIM_STOCK_SITL_ENABLED
++        // naviator: update last 'guided' heartbeat
++        printf("handle_command_int_do_reposition: guided_last_t reset");
++        copter.guided_last_t = millis();
++    #endif
++
+     return MAV_RESULT_ACCEPTED;
+ #else
+     return MAV_RESULT_UNSUPPORTED;
+@@ -1276,6 +1288,12 @@ void GCS_MAVLINK_Copter::handle_message_set_attitude_target(const mavlink_messag
+ 
+         copter.mode_guided.set_angle(attitude_quat, ang_vel_body,
+                 climb_rate_or_thrust, use_thrust);
++
++        #if AP_SIM_STOCK_SITL_ENABLED
++            // Marco: update last 'guided' heartbeat
++            // this is the most important one
++            copter.guided_last_t = millis();
++        #endif
+ }
+ 
+ void GCS_MAVLINK_Copter::handle_message_set_position_target_local_ned(const mavlink_message_t &msg)
+@@ -1382,6 +1400,12 @@ void GCS_MAVLINK_Copter::handle_message_set_position_target_local_ned(const mavl
+             // input is not valid so stop
+             copter.mode_guided.init(true);
+         }
++
++        #if AP_SIM_STOCK_SITL_ENABLED
++            // Marco: update last 'guided' heartbeat
++            printf("SET_POSITION_TARGET_LOCAL_NED: guided_last_t reset");
++            copter.guided_last_t = millis();
++        #endif
+ }
+ 
+ void GCS_MAVLINK_Copter::handle_message_set_position_target_global_int(const mavlink_message_t &msg)
+@@ -1484,6 +1508,12 @@ void GCS_MAVLINK_Copter::handle_message_set_position_target_global_int(const mav
+             // input is not valid so stop
+             copter.mode_guided.init(true);
+         }
++
++        #if AP_SIM_STOCK_SITL_ENABLED
++            // Marco: update last 'guided' heartbeat
++            printf("SET_POSITION_TARGET_GLOBAL_INT: guided_last_t reset");
++            copter.guided_last_t = millis();
++        #endif
+ }
+ #endif  // MODE_GUIDED_ENABLED
+ 
+@@ -1491,6 +1521,51 @@ void GCS_MAVLINK_Copter::handle_message(const mavlink_message_t &msg)
+ {
+ 
+     switch (msg.msgid) {
++#if AP_SIM_STOCK_SITL_ENABLED
++    case MAVLINK_MSG_ID_MANUAL_CONTROL:
++    {
++        #if CONFIG_HAL_BOARD == HAL_BOARD_SITL
++        // simulate RC loss if in guided mode and underwater w/o RF
++        // if(copter.flightmode->in_guided_mode() && copter.sitl.rc_fail.get() == SITL::SIM::SITL_RCFail_NoPulses) {
++        // we actually want to simulate RC failsafe in all modes not just guided (i.e. STABILIZE, AUTO, etc)
++        if(copter.sitl.rc_fail.get() == SITL::SIM::SITL_RCFail_NoPulses) {
++            break;
++        }
++        #endif
++
++        if (msg.sysid != copter.g.sysid_my_gcs) {
++            break; // only accept control from our gcs
++        }
++
++        mavlink_manual_control_t packet;
++        mavlink_msg_manual_control_decode(&msg, &packet);
++
++        if (packet.target != copter.g.sysid_this_mav) {
++            break; // only accept control aimed at us
++        }
++
++        if (packet.z < 0) { // Copter doesn't do negative thrust
++            break;
++        }
++        
++        uint32_t tnow = AP_HAL::millis();
++
++        manual_override(copter.channel_roll, packet.y, 1000, 2000, tnow);
++        manual_override(copter.channel_pitch, packet.x, 1000, 2000, tnow, true);
++        manual_override(copter.channel_throttle, packet.z, 0, 1000, tnow);
++        manual_override(copter.channel_yaw, packet.r, 1000, 2000, tnow);
++
++        // a manual control message is considered to be a 'heartbeat'
++        // from the ground station for failsafe purposes
++        gcs().sysid_myggcs_seen(tnow);
++
++        // Marco: update last 'guided' heartbeat
++        copter.manual_control_last_t = millis();
++
++        break;
++    }
++#endif
++        
+ #if MODE_GUIDED_ENABLED
+     case MAVLINK_MSG_ID_SET_ATTITUDE_TARGET:
+         handle_message_set_attitude_target(msg);
+diff --git a/ArduCopter/UserCode.cpp b/ArduCopter/UserCode.cpp
+index 1fc9824fdc..cb7db41c75 100644
+--- a/ArduCopter/UserCode.cpp
++++ b/ArduCopter/UserCode.cpp
+@@ -1,4 +1,5 @@
+ #include "Copter.h"
++#include "AP_ESC_Telem/AP_ESC_Telem.h"
+ 
+ #ifdef USERHOOK_INIT
+ void Copter::userhook_init()
+@@ -12,6 +13,55 @@ void Copter::userhook_init()
+ void Copter::userhook_FastLoop()
+ {
+     // put your 100Hz code here
++
++#if AP_SIM_STOCK_SITL_ENABLED
++    // handle sitl escs
++    for(uint8_t i = 0; i<8; i++) {
++        bool senses_water;
++        int16_t measured_kv;
++        uint32_t last_update;
++        senses_water = copter.sitl.state.is_uw[i];
++        if(senses_water) measured_kv = 40;
++        else measured_kv = 400;
++
++        float current;
++        if(!copter.battery.current_amps(current, 0)) current = 0;
++        last_update = copter.sitl.state.timestamp_us/1000;
++
++        // some fake values so that is_telemetry_active() returns true
++        AP_ESC_Telem_Backend::TelemetryData t {
++            .temperature_cdeg = 3200,
++            .voltage = copter.battery.voltage(0),
++            .current = current,
++            .consumption_mah = 1.0f,
++            .motor_temp_cdeg = measured_kv,
++            .last_update_ms = last_update,
++#if AP_EXTENDED_ESC_TELEM_ENABLED
++            .input_duty = 1,
++            .output_duty = 2,
++            .flags = 3,
++            .power_percentage = (uint8_t)copter.sitl.state.is_uw[i],
++#endif
++        };
++
++        AP::esc_telem().update_telem_data(i, t,
++            AP_ESC_Telem_Backend::TelemetryType::CURRENT
++                | AP_ESC_Telem_Backend::TelemetryType::VOLTAGE
++                | AP_ESC_Telem_Backend::TelemetryType::CONSUMPTION
++                | AP_ESC_Telem_Backend::TelemetryType::TEMPERATURE
++                | AP_ESC_Telem_Backend::TelemetryType::MOTOR_TEMPERATURE
++#if AP_EXTENDED_ESC_TELEM_ENABLED
++                | AP_ESC_Telem_Backend::TelemetryType::POWER_PERCENTAGE
++                | AP_ESC_Telem_Backend::TelemetryType::INPUT_DUTY
++                | AP_ESC_Telem_Backend::TelemetryType::OUTPUT_DUTY
++                | AP_ESC_Telem_Backend::TelemetryType::FLAGS
++#endif
++                );
++
++        AP::esc_telem().update_rpm(i, copter.sitl.state.nvrpm[i], 0);
++    }
++#endif
++
+ }
+ #endif
+ 
+@@ -26,6 +76,198 @@ void Copter::userhook_50Hz()
+ void Copter::userhook_MediumLoop()
+ {
+     // put your 10Hz code here
++
++#if AP_SIM_STOCK_SITL_ENABLED
++    static bool debug_on = false;
++
++    // handle SIM GPS (for now, assume one GPS)
++    // capture GPS below water
++    // baro offset + 0.08m. This way our gzposition.z matches baro alt
++    if(copter.sitl.state.gzposition.z + 0.08 <= -SITL_RF_HEIGHT)
++    {
++        // static bool printed = false;
++        // if (!printed) {
++        //     gcs().send_text(MAV_SEVERITY_WARNING,
++        //         "gz pos %0.2f sitlh %d", copter.sitl.state.gzposition.z, (int)-SITL_RF_HEIGHT);
++        //     printed = true;
++        // }
++
++        if(nvsitl.radios_state != NV_SITL_RF_BELOW_WATER_COMPLETE)
++        {
++            if(nvsitl.radios_state != NV_SITL_RF_BELOW_WATER)
++            {
++                /*
++                Expecting (16 sats, hdop 0.64, vdop 1.25, spd 0.2 m/s, gps_status 3)
++                */
++                printf("NV_SITL :: NV_SITL_RF_BELOW_WATER\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: NV_SITL_RF_BELOW_WATER");
++                nvsitl.radios_state = NV_SITL_RF_BELOW_WATER;
++                nvsitl.radios_surface_t_ms = millis();
++                nvsitl.radios_state_num = 0;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 1500 && nvsitl.radios_state_num == 0)
++            {
++                /*
++                1.5s: we get:
++                a gps glitch
++                10-12 satellites
++                hdop 0.81
++                gps_spd 5 m/s
++                radio failsafe
++                vibration compensation ON
++                */
++                printf("NV_SITL :: RC_NO_PULSES (satellites take a hit)\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: RC_NO_PULSES (satellites take a hit)");
++                copter.sitl.gps_numsats[0].set_and_save_ifchanged(10);
++                copter.sitl.gps_vel_err[0].set_and_save_ifchanged(Vector3f(5, 5, 5));
++                copter.sitl.gps_glitch[0].set_and_save_ifchanged(Vector3f(0.001, 0.001, 0.001));
++                copter.sitl.gps_accuracy[0].set_and_save_ifchanged(5.0);
++                copter.sitl.gps_hdop = 0.81;
++                copter.sitl.gps_vdop = 1.55;
++                copter.sitl.rc_fail.set_and_save_ifchanged(SITL::SIM::SITL_RCFail_NoPulses);
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 2500 && nvsitl.radios_state_num == 1)
++            {
++                /*
++                2.5s: EKF variance
++                gps_spd 14 m/s
++                v_z 15 m/s
++                */
++                printf("NV_SITL :: GPS_VELOCITY_ERROR\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: GPS_VELOCITY_ERROR");
++                copter.sitl.gps_vel_err[0].set_and_save_ifchanged(Vector3f(14, 14, 15));
++                copter.sitl.gps_accuracy[0].set_and_save_ifchanged(10.0);
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 4500 && nvsitl.radios_state_num == 2)
++            {
++                /*
++                4.5s: all satellites lost, gps_spd 30 m/s, v_z 15 m/s
++                */
++                printf("NV_SITL :: GPS_LOST\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: GPS_LOST");
++                copter.sitl.gps_vel_err[0].set_and_save_ifchanged(Vector3f(30, 30, 15));
++                copter.sitl.gps_accuracy[0].set_and_save_ifchanged(30);
++                copter.sitl.gps_numsats[0].set_and_save_ifchanged(0);
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 5000 && nvsitl.radios_state_num == 3)
++            {
++                /*
++                5.0s: hdop 100, vdop 100, gps_status 1
++                */
++                printf("NV_SITL :: NV_SITL_RF_BELOW_WATER_COMPLETE\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: NV_SITL_RF_BELOW_WATER_COMPLETE");
++                nvsitl.radios_state = NV_SITL_RF_BELOW_WATER_COMPLETE;
++                copter.sitl.gps_hdop = 99.0;
++                copter.sitl.gps_vdop = 99.0;
++                copter.sitl.gps_disable[0].set_and_save_ifchanged(1);
++                nvsitl.radios_state_num++;
++            }
++        }
++    }
++    // capture GPS above water: copter.sitl.state.gzposition.z > -SITL_RF_HEIGHT
++    else
++    {
++        if(nvsitl.radios_state != NV_SITL_RF_IN_AIR_COMPLETE)
++        {
++            if(nvsitl.radios_state != NV_SITL_RF_IN_AIR)
++            {
++                /*
++                Expecting (0 sats, hdop 100, vdop 100, gps_spd 30 m/s, v_z 15 m/s, gps_status 1)
++                */
++                printf("NV_SITL :: NV_SITL_RF_IN_AIR\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: NV_SITL_RF_IN_AIR");
++                nvsitl.radios_state = NV_SITL_RF_IN_AIR;
++                nvsitl.radios_surface_t_ms = millis();
++                nvsitl.radios_state_num = 0;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 1000 && nvsitl.radios_state_num == 0)
++            {
++                /*
++                1.0s: gps_status 3, hdop 100, vdop 100, vz -0.22, sats 9, spd 0.34
++                */
++                printf("NV_SITL ::   GPS_PARTIALLY_RECOVERED (WITH SATS)\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL ::   GPS_PARTIALLY_RECOVERED (WITH SATS)");
++                copter.sitl.gps_numsats[0].set_and_save_ifchanged(9);
++                copter.sitl.gps_accuracy[0].set_and_save_ifchanged(3.0);
++                copter.sitl.gps_vel_err[0].set_and_save_ifchanged(Vector3f(0.34, 0.34, 0.34));
++                copter.sitl.gps_glitch[0].set_and_save_ifchanged(Vector3f(0.0001, 0.0001, 0.0001));
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 1500 && nvsitl.radios_state_num == 1)
++            {
++                /*
++                1.5s: hdop 0.8, vdop 1.6, vz 0.05, spd 0.05
++                */
++
++                printf("NV_SITL ::   GPS_FULLY_RECOVERED\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL ::   GPS_FULLY_RECOVERED");
++                copter.sitl.gps_accuracy[0].set_and_save_ifchanged(0.3);
++                copter.sitl.gps_vel_err[0].set_and_save_ifchanged(Vector3f(0.0, 0.0, 0.0));
++                copter.sitl.gps_hdop = 0.83;
++                copter.sitl.gps_vdop = 1.57;
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 2000 && nvsitl.radios_state_num == 2)
++            {
++                /*
++                2.0s: radio fs cleared, sats 12, vz 0.2, spd 0.2
++                */
++                copter.sitl.rc_fail.set_and_save_ifchanged(SITL::SIM::SITL_RCFail_None);
++                copter.sitl.gps_numsats[0].set_and_save_ifchanged(12);
++                printf("NV_SITL ::   RC_PULSES_RECOVERED\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL ::   RC_PULSES_RECOVERED");
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 2500 && nvsitl.radios_state_num == 3)
++            {
++                /*
++                2.5s: sats 16
++                */
++                printf("NV_SITL ::   GPS_SATS_NORMAL\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL ::   GPS_SATS_NORMAL");
++                copter.sitl.gps_numsats[0].set_and_save_ifchanged(16);
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 15000 && nvsitl.radios_state_num == 4)
++            {
++                /*
++                15.0s: update
++                */
++                copter.sitl.gps_glitch[0].set_and_save_ifchanged(Vector3f(0.00001, 0.00001, 0.00001));
++                copter.sitl.gps_hdop = 0.62;
++                copter.sitl.gps_vdop = 1.05;
++                printf("NV_SITL ::   GLITCH_LOWERED\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL ::   GLITCH_LOWERED");
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 24000 && nvsitl.radios_state_num == 5)
++            {
++                /*
++                24.0s: EKF2 IMU0 is using GPS & EKF2 IMU1 is using GPS
++                */
++                copter.sitl.gps_disable[0].set_and_save_ifchanged(0);
++                copter.sitl.gps_glitch[0].set_and_save_ifchanged(Vector3f(0.0, 0.0, 0.0));
++                printf("NV_SITL ::   EKF_SHOULD_BE_OK\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL ::   EKF_SHOULD_BE_OK");
++                nvsitl.radios_state_num++;
++            }
++            else if(millis() - nvsitl.radios_surface_t_ms > 25000 && nvsitl.radios_state_num == 6)
++            {
++                /*
++                25.0s: FS-EKF-INAV: Everything OK
++                */
++                printf("NV_SITL :: NV_SITL_RF_IN_AIR_COMPLETE\n");
++                if (debug_on) gcs().send_text(MAV_SEVERITY_INFO, "NV_SITL :: NV_SITL_RF_IN_AIR_COMPLETE");
++                nvsitl.radios_state = NV_SITL_RF_IN_AIR_COMPLETE;
++                nvsitl.radios_state_num++;
++            }
++        }
++    }
++    #endif
++
+ }
+ #endif
+ 
+@@ -40,6 +282,89 @@ void Copter::userhook_SlowLoop()
+ void Copter::userhook_SuperSlowLoop()
+ {
+     // put your 1Hz code here
++
++#if AP_SIM_STOCK_SITL_ENABLED
++
++    /* handle GUIDED/GUIDED_NOGPS timeout */
++    
++    // check if motors are uw
++    bool is_uw;
++    uint8_t uw_counter = 0;
++    for (int b = 0 ; b < 8; b++) {
++        if ((uint8_t)copter.sitl.state.is_uw[b] == 1) uw_counter++;
++    }
++    if (uw_counter >= 2) is_uw = true;
++    else is_uw = false;
++
++    #define COMPANION_TIMEOUT MAX(copter.g2.guided_timeout, 3)
++    // if we are armed in guided
++    if (
++        copter.notify.flags.armed
++        && (flightmode->mode_number() == Mode::Number::GUIDED || flightmode->mode_number() == Mode::Number::GUIDED_NOGPS)
++    ) {
++        // && time > timeout
++        if(
++            millis() - guided_last_t > (uint32_t)(COMPANION_TIMEOUT*1000)
++            || millis() - companion_last_t > (uint32_t)(COMPANION_TIMEOUT*1000)
++        ) {
++            bool report_guided_timeout;
++            if(millis() - guided_report_last_t > 3000) {
++                report_guided_timeout = true;
++                guided_report_last_t = millis();
++            }
++            else {
++                report_guided_timeout = false;
++            }
++
++            if(report_guided_timeout)
++                gcs().send_text(MAV_SEVERITY_WARNING,
++                    "GUIDED Timeout, dt = %lu, mode = %d",
++                    (unsigned long)(millis() - guided_last_t),
++                    (int)flightmode->mode_number()
++                );
++            // if we also have RC_FAILSAFE, go to LAND
++            if(
++                !copter.notify.flags.failsafe_radio
++                && !is_uw
++                && copter.notify.flags.have_pos_abs 
++                && copter.notify.flags.gps_fusion
++            ) {
++                if(report_guided_timeout) {
++                    gcs().send_text(MAV_SEVERITY_WARNING,
++                        "Air and RF --> LOITER (action off)"
++                    );
++                    gcs().send_text(MAV_SEVERITY_WARNING,
++                        "[rcfs=%d, uw=%d, pos=%d, gps=%d]",
++                        copter.notify.flags.failsafe_radio,
++                        is_uw,
++                        copter.notify.flags.have_pos_abs,
++                        copter.notify.flags.gps_fusion
++                    );
++                }
++
++                //set_mode(Mode::Number::LOITER, ModeReason::GCS_FAILSAFE);
++            }
++            // if we're underwater or we dont have RF, go to LAND
++            else {
++                if(report_guided_timeout) {
++                    gcs().send_text(MAV_SEVERITY_WARNING,
++                        "UW or no RF --> LAND (action off)"
++                    );
++                    gcs().send_text(MAV_SEVERITY_WARNING,
++                        "[rcfs=%d, uw=%d, pos=%d, gps=%d]",
++                        copter.notify.flags.failsafe_radio,
++                        is_uw,
++                        copter.notify.flags.have_pos_abs,
++                        copter.notify.flags.gps_fusion
++                    );
++                }
++
++                //set_mode(Mode::Number::LAND, ModeReason::GCS_FAILSAFE);
++            }
++
++        }
++    }
++#endif 
+ }
+ #endif
+ 
+diff --git a/ArduCopter/UserVariables.h b/ArduCopter/UserVariables.h
+index cdd02093d2..b6f913444f 100644
+--- a/ArduCopter/UserVariables.h
++++ b/ArduCopter/UserVariables.h
+@@ -4,13 +4,38 @@
+ // variables
+ #ifdef USERHOOK_VARIABLES
+ 
+-#if WII_CAMERA == 1
+-WiiCamera           ircam;
+-int                 WiiRange=0;
+-int                 WiiRotation=0;
+-int                 WiiDisplacementX=0;
+-int                 WiiDisplacementY=0;
+-#endif  // WII_CAMERA
++// #if WII_CAMERA == 1
++// WiiCamera           ircam;
++// int                 WiiRange=0;
++// int                 WiiRotation=0;
++// int                 WiiDisplacementX=0;
++// int                 WiiDisplacementY=0;
++// #endif  // WII_CAMERA
++
++#if AP_SIM_STOCK_SITL_ENABLED
++
++    #define SITL_RF_HEIGHT 0.1 // meters
++
++    enum NV_SITL {
++    NV_SITL_UNKNOWN,
++    NV_SITL_RF_BELOW_WATER,
++    NV_SITL_RF_BELOW_WATER_COMPLETE,
++    NV_SITL_RF_IN_AIR,
++    NV_SITL_RF_IN_AIR_COMPLETE
++    };
++
++    struct {
++    int8_t    radios_state                = NV_SITL_UNKNOWN;
++    uint32_t  radios_surface_t_ms         = 0;
++    uint8_t   radios_state_num            = 0;
++    } nvsitl;
++
++    uint32_t companion_last_t = 0;
++    uint32_t guided_last_t = 0;
++    uint32_t guided_report_last_t = 0;
++    uint32_t manual_control_last_t = 0;
++
++#endif
+ 
+ #endif  // USERHOOK_VARIABLES
+ 
+diff --git a/ArduCopter/events.cpp b/ArduCopter/events.cpp
+index 7b441a27c7..f23cd067ca 100644
+--- a/ArduCopter/events.cpp
++++ b/ArduCopter/events.cpp
+@@ -44,6 +44,7 @@ void Copter::failsafe_radio_on_event()
+     }
+ 
+     // Conditions to deviate from FS_THR_ENABLE selection and send specific GCS warning
++    // if (should_disarm_on_failsafe() && copter.flightmode != &copter.mode_guided_nogps) {    // naviator modified
+     if (should_disarm_on_failsafe()) {
+         // should immediately disarm when we're on the ground
+         announce_failsafe("Radio", "Disarming");
+diff --git a/ArduCopter/mode_guided.cpp b/ArduCopter/mode_guided.cpp
+index d70be9f2b5..67edc87711 100644
+--- a/ArduCopter/mode_guided.cpp
++++ b/ArduCopter/mode_guided.cpp
+@@ -57,6 +57,12 @@ bool ModeGuided::init(bool ignore_checks)
+     guided_accel_target_cmss.zero();
+     send_notification = false;
+ 
++    #if AP_SIM_STOCK_SITL_ENABLED
++    // Marco -- consider switching into GUIDED as a guided heartbeat 
++    printf("ModeGuided::init: guided_last_t reset");
++    copter.guided_last_t = millis();
++    #endif
++
+     // clear pause state when entering guided mode
+     _paused = false;
+ 
+diff --git a/libraries/AP_Baro/AP_Baro.h b/libraries/AP_Baro/AP_Baro.h
+index 420803ea7a..044ec4c446 100644
+--- a/libraries/AP_Baro/AP_Baro.h
++++ b/libraries/AP_Baro/AP_Baro.h
+@@ -191,7 +191,7 @@ public:
+     };
+ 
+     // Get the type (Air or Water) of a particular instance
+-    baro_type_t get_type(uint8_t instance) { return sensors[instance].type; };
++    baro_type_t get_type(uint8_t instance) const { return sensors[instance].type; };
+ 
+     // register a new sensor, claiming a sensor slot. If we are out of
+     // slots it will panic
+diff --git a/libraries/AP_Baro/AP_Baro_SITL.cpp b/libraries/AP_Baro/AP_Baro_SITL.cpp
+index cd914632a3..3087d6668d 100644
+--- a/libraries/AP_Baro/AP_Baro_SITL.cpp
++++ b/libraries/AP_Baro/AP_Baro_SITL.cpp
+@@ -17,11 +17,15 @@ AP_Baro_SITL::AP_Baro_SITL(AP_Baro &baro) :
+ {
+     if (_sitl != nullptr) {
+         _instance = _frontend.register_sensor();
+-#if APM_BUILD_TYPE(APM_BUILD_ArduSub)
++#if APM_BUILD_TYPE(APM_BUILD_ArduSub) || AP_SIM_STOCK_SITL_ENABLED
+         _frontend.set_type(_instance, AP_Baro::BARO_TYPE_WATER);
+ #endif
+         set_bus_id(_instance, AP_HAL::Device::make_bus_id(AP_HAL::Device::BUS_TYPE_SITL, 0, _instance, DEVTYPE_BARO_SITL));
+         hal.scheduler->register_timer_process(FUNCTOR_BIND(this, &AP_Baro_SITL::_timer, void));
++
++#if AP_SIM_STOCK_SITL_ENABLED
++        printf("Registering baro: %u (type %u)\n", _instance, DEVTYPE_BARO_SITL);
++#endif
+     }
+ }
+ 
+@@ -61,6 +65,10 @@ void AP_Baro_SITL::_timer()
+ 
+     float sim_alt = _sitl->state.altitude;
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    float sim_z = _sitl->state.gzposition.z;
++#endif
++
+     if (_sitl->baro[_instance].disable) {
+         // barometer is disabled
+         return;
+@@ -117,6 +125,28 @@ void AP_Baro_SITL::_timer()
+         sim_alt = _buffer[best_index].data;
+     }
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    float p, T;
++
++    if(sim_z > 0) {
++        float T_K;
++        AP_Baro::get_pressure_temperature_for_alt_amsl(sim_alt, p, T_K);
++        T = KELVIN_TO_C(T_K);
++        temperature_adjustment(p, T);
++
++        // add in correction for wind effects
++        p += wind_pressure_correction(_instance);
++    } else {
++        float rho, delta, theta;
++        AP_Baro::SimpleUnderWaterAtmosphere(-sim_alt * 0.001f, rho, delta, theta);
++        p = SSL_AIR_PRESSURE * delta;
++        T = KELVIN_TO_C(SSL_AIR_TEMPERATURE * theta);
++    }
++
++    _recent_press = p;
++    _recent_temp = T;
++    _has_sample = true;
++#else
+ #if !APM_BUILD_TYPE(APM_BUILD_ArduSub)
+     float p, T_K;
+     AP_Baro::get_pressure_temperature_for_alt_amsl(sim_alt, p, T_K);
+@@ -135,6 +165,7 @@ void AP_Baro_SITL::_timer()
+     _recent_press = p;
+     _recent_temp = T;
+     _has_sample = true;
++#endif
+ }
+ 
+ // unhealthy if baro is turned off or beyond supported instances
+diff --git a/libraries/AP_ESC_Telem/AP_ESC_Telem.cpp b/libraries/AP_ESC_Telem/AP_ESC_Telem.cpp
+index f4ff9dea05..9bc9f79ef1 100644
+--- a/libraries/AP_ESC_Telem/AP_ESC_Telem.cpp
++++ b/libraries/AP_ESC_Telem/AP_ESC_Telem.cpp
+@@ -680,7 +680,7 @@ uint16_t AP_ESC_Telem::merge_edt2_stress(uint16_t old_stress, uint16_t new_stres
+ 
+ void AP_ESC_Telem::update()
+ {
+-#if HAL_LOGGING_ENABLED
++#if HAL_LOGGING_ENABLED || AP_SIM_STOCK_SITL_ENABLED
+     AP_Logger *logger = AP_Logger::get_singleton();
+     const uint64_t now_us64 = AP_HAL::micros64();
+ 
+@@ -725,7 +725,7 @@ void AP_ESC_Telem::update()
+                 };
+                 AP::logger().WriteBlock(&pkt, sizeof(pkt));
+ 
+-#if AP_EXTENDED_ESC_TELEM_ENABLED
++#if AP_EXTENDED_ESC_TELEM_ENABLED || AP_SIM_STOCK_SITL_ENABLED
+                 // Write ESC extended status messages
+                 //   id: starts from 0
+                 //   input duty: duty cycle input to the ESC in percent
+diff --git a/libraries/AP_ESC_Telem/AP_ESC_Telem_SITL.cpp b/libraries/AP_ESC_Telem/AP_ESC_Telem_SITL.cpp
+index 4e8c4c472e..3b07f88d4e 100644
+--- a/libraries/AP_ESC_Telem/AP_ESC_Telem_SITL.cpp
++++ b/libraries/AP_ESC_Telem/AP_ESC_Telem_SITL.cpp
+@@ -65,6 +65,7 @@ void AP_ESC_Telem_SITL::update()
+         const float min_rpm = hal.util->get_soft_armed()? sitl->esc_rpm_armed : 0;
+         update_rpm(motor, MAX(min_rpm, sitl->state.rpm[motor]));
+ 
++#if AP_SIM_NAVIATOR_ENABLED
+         // Update the Naviator ESC water detection.
+         // TODO: Improve with roll/pitch incorporation.
+         float alt = sitl->state.altitude - 0.01f*sitl->state.home.alt;
+@@ -84,7 +85,7 @@ void AP_ESC_Telem_SITL::update()
+         if (alt < threshold_alt) {
+             power_percentage = 1; // Set the ESC to report underwater.
+         }
+-
++#endif
+         // some fake values so that is_telemetry_active() returns true
+         TelemetryData t {
+             .temperature_cdeg = 3200,
+@@ -96,7 +97,11 @@ void AP_ESC_Telem_SITL::update()
+             .input_duty = 1,
+             .output_duty = 2,
+             .flags = 3,
++    #if AP_SIM_NAVIATOR_ENABLED
+             .power_percentage = power_percentage,
++    #else
++            .power_percentage = 4,
++    #endif
+ #endif
+         };
+ 
+diff --git a/libraries/AP_HAL_SITL/SITL_State.cpp b/libraries/AP_HAL_SITL/SITL_State.cpp
+index af55acaa1f..8525ea39fe 100644
+--- a/libraries/AP_HAL_SITL/SITL_State.cpp
++++ b/libraries/AP_HAL_SITL/SITL_State.cpp
+@@ -129,6 +129,19 @@ void SITL_State::_fdm_input_step(void)
+         return;
+     }
+ 
++// this doesn't seem to do anything
++// new_rc_input and last_pwm_input are not used anywhere else in the code
++//
++// #if AP_SIM_STOCK_SITL_ENABLED
++//     static uint32_t last_pwm_input = 0;
++
++//     // simulate RC input at 50Hz
++//     if (AP_HAL::millis() - last_pwm_input >= 20 && _sitl != nullptr && _sitl->rc_fail != SITL::SIM::SITL_RCFail_NoPulses) {
++//         last_pwm_input = AP_HAL::millis();
++//         new_rc_input = true;
++//     }
++// #endif
++
+     _scheduler->sitl_begin_atomic();
+ 
+     if (_update_count == 0 && _sitl != nullptr) {
+diff --git a/libraries/AP_HAL_SITL/SITL_cmdline.cpp b/libraries/AP_HAL_SITL/SITL_cmdline.cpp
+index 0550b772cb..c6f7615645 100644
+--- a/libraries/AP_HAL_SITL/SITL_cmdline.cpp
++++ b/libraries/AP_HAL_SITL/SITL_cmdline.cpp
+@@ -40,7 +40,10 @@
+ #include <SITL/SIM_Blimp.h>
+ #include <SITL/SIM_NoVehicle.h>
+ #include <SITL/SIM_StratoBlimp.h>
++
++#if AP_SIM_NAVIATOR_ENABLED
+ #include <SITL/SIM_Naviator.h>
++#endif
+ 
+ #include <AP_Filesystem/AP_Filesystem.h>
+ 
+@@ -142,7 +145,9 @@ static const struct {
+     { "hexa-dji",           MultiCopter::create },
+     { "octa",               MultiCopter::create },
+     { "octa-cwx",           MultiCopter::create },
++#if AP_SIM_NAVIATOR_ENABLED    
+     { "naviator",           Naviator::create },
++#endif
+     { "octa-dji",           MultiCopter::create },
+     { "octa-quad-cwx",      MultiCopter::create },
+     { "dodeca-hexa",        MultiCopter::create },
+diff --git a/libraries/AP_Math/quaternion.cpp b/libraries/AP_Math/quaternion.cpp
+index 552dd96852..e514593d51 100644
+--- a/libraries/AP_Math/quaternion.cpp
++++ b/libraries/AP_Math/quaternion.cpp
+@@ -694,6 +694,13 @@ void QuaternionT<T>::zero(void)
+ template <typename T>
+ bool QuaternionT<T>::is_unit_length(void) const
+ {
++    // naviator fix: this doesn't handle singularities by default, but the below does
++    T len_squared = length_squared();
++    // Check if the length_squared is finite 
++    if (!std::isfinite(len_squared)) {
++        return false;
++    }
++   
+     if (fabsF(length_squared() - 1) < 1E-3) {
+         return true;
+     }
+diff --git a/libraries/AP_Scripting/Naviator/modules/Common.lua b/libraries/AP_Scripting/Naviator/modules/Common.lua
+index 0db11258f9..a720578cdd 100644
+--- a/libraries/AP_Scripting/Naviator/modules/Common.lua
++++ b/libraries/AP_Scripting/Naviator/modules/Common.lua
+@@ -151,7 +151,8 @@ end
+ local GPS_HDOP_GOOD = Parameter("GPS_HDOP_GOOD")
+ local FS_GCS_TIMEOUT = Parameter("FS_GCS_TIMEOUT")
+ local SIM_BARO_COUNT = Parameter()
+-local in_simulation = SIM_BARO_COUNT:init("SIM_BARO_COUNT")  -- Indicator of whether we are in a simulation.
++-- local in_simulation = SIM_BARO_COUNT:init("SIM_BARO_COUNT")  -- Indicator of whether we are in a simulation.
++local in_simulation = true  -- needed for gazebo
+ local rangefinder_backend = rangefinder:get_backend(0)
+ 
+ -------------------------------------------------------------------------------
+diff --git a/libraries/SITL/SIM_Aircraft.cpp b/libraries/SITL/SIM_Aircraft.cpp
+index 634334404b..20b0010e86 100644
+--- a/libraries/SITL/SIM_Aircraft.cpp
++++ b/libraries/SITL/SIM_Aircraft.cpp
+@@ -362,6 +362,12 @@ double Aircraft::rand_normal(double mean, double stddev)
+ */
+ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
+ {
++#if AP_SIM_STOCK_SITL_ENABLED
++    fdm.gzposition.x = gzposition.x;
++    fdm.gzposition.y = -gzposition.y;
++    fdm.gzposition.z = -gzposition.z + 0.08; 
++#endif
++
+     bool is_smoothed = false;
+     if (use_smoothing) {
+         smooth_sensors();
+@@ -417,6 +423,25 @@ void Aircraft::fill_fdm(struct sitl_fdm &fdm)
+ 
+     fdm.wind_ef = wind_ef;
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    fdm.is_uw[0] = is_uw[0];
++    fdm.is_uw[1] = is_uw[1];
++    fdm.is_uw[2] = is_uw[2];
++    fdm.is_uw[3] = is_uw[3];
++    fdm.is_uw[4] = is_uw[4];
++    fdm.is_uw[5] = is_uw[5];
++    fdm.is_uw[6] = is_uw[6];
++    fdm.is_uw[7] = is_uw[7];
++    fdm.nvrpm[0] = aircraft_nvrpm[0];
++    fdm.nvrpm[1] = aircraft_nvrpm[1];
++    fdm.nvrpm[2] = aircraft_nvrpm[2];
++    fdm.nvrpm[3] = aircraft_nvrpm[3];
++    fdm.nvrpm[4] = aircraft_nvrpm[4];
++    fdm.nvrpm[5] = aircraft_nvrpm[5];
++    fdm.nvrpm[6] = aircraft_nvrpm[6];
++    fdm.nvrpm[7] = aircraft_nvrpm[7];
++#endif
++
+     if (is_smoothed) {
+         fdm.xAccel = smoothing.accel_body.x;
+         fdm.yAccel = smoothing.accel_body.y;
+diff --git a/libraries/SITL/SIM_Aircraft.h b/libraries/SITL/SIM_Aircraft.h
+index 32803b1e69..542f72430b 100644
+--- a/libraries/SITL/SIM_Aircraft.h
++++ b/libraries/SITL/SIM_Aircraft.h
+@@ -210,6 +210,12 @@ protected:
+     bool lock_step_scheduled;
+     uint32_t last_one_hz_ms;
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    float aircraft_nvrpm[8];
++    uint64_t is_uw[8];
++    Vector3d gzposition;
++#endif
++
+     // battery model
+     Battery battery;
+ 
+@@ -281,8 +287,11 @@ protected:
+     bool use_smoothing;
+     bool disable_origin_movement;
+ 
++#if AP_SIM_NAVIATOR_ENABLED
+     virtual float ground_height_difference() const;
+-
++#else
++    float ground_height_difference() const;
++#endif
+     virtual bool on_ground() const;
+ 
+     // returns height above ground level in metres
+diff --git a/libraries/SITL/SIM_JSON.cpp b/libraries/SITL/SIM_JSON.cpp
+index 701d07621a..6b195ff151 100644
+--- a/libraries/SITL/SIM_JSON.cpp
++++ b/libraries/SITL/SIM_JSON.cpp
+@@ -141,9 +141,15 @@ void JSON::output_servos(const struct sitl_input &input)
+     This parser does not do any syntax checking, and is not at all
+     general purpose
+ */
++#if AP_SIM_STOCK_SITL_ENABLED
++uint64_t JSON::parse_sensors(const char *json)
++{
++    uint64_t received_bitmask = 0;
++#else
+ uint32_t JSON::parse_sensors(const char *json)
+ {
+     uint32_t received_bitmask = 0;
++#endif
+ 
+     //printf("%s\n", json);
+     for (uint16_t i=0; i<ARRAY_SIZE(keytable); i++) {
+@@ -267,8 +273,11 @@ void JSON::recv_fdm(const struct sitl_input &input)
+     if (p1 == nullptr) {
+         return;
+     }
+-
++#if AP_SIM_STOCK_SITL_ENABLED
++    const uint64_t received_bitmask = parse_sensors((const char *)(p1+1));
++#else
+     const uint32_t received_bitmask = parse_sensors((const char *)(p1+1));
++#endif
+     if (received_bitmask == 0) {
+         // did not receive one of the mandatory fields
+         printf("Did not contain all mandatory fields\n");
+@@ -305,6 +314,13 @@ void JSON::recv_fdm(const struct sitl_input &input)
+     accel_body = state.imu.accel_body;
+     gyro = state.imu.gyro;
+     velocity_ef = state.velocity;
++
++#if AP_SIM_STOCK_SITL_ENABLED
++    gzposition.x = state.position.x;
++    gzposition.y = state.position.y;
++    gzposition.z = state.position.z;
++#endif
++
+     position = state.position;
+     position.xy() += origin.get_distance_NE_double(home);
+     use_time_sync = !state.no_time_sync;
+@@ -376,6 +392,26 @@ void JSON::recv_fdm(const struct sitl_input &input)
+         time_advance();
+     }
+     last_timestamp_s = state.timestamp_s;
++
++#if AP_SIM_STOCK_SITL_ENABLED
++    is_uw[0] = state.is_uw[0];
++    is_uw[1] = state.is_uw[1];
++    is_uw[2] = state.is_uw[2];
++    is_uw[3] = state.is_uw[3];
++    is_uw[4] = state.is_uw[4];
++    is_uw[5] = state.is_uw[5];
++    is_uw[6] = state.is_uw[6];
++    is_uw[7] = state.is_uw[7];
++    aircraft_nvrpm[0] = state.json_nvrpm[0];
++    aircraft_nvrpm[1] = state.json_nvrpm[1];
++    aircraft_nvrpm[2] = state.json_nvrpm[2];
++    aircraft_nvrpm[3] = state.json_nvrpm[3];
++    aircraft_nvrpm[4] = state.json_nvrpm[4];
++    aircraft_nvrpm[5] = state.json_nvrpm[5];
++    aircraft_nvrpm[6] = state.json_nvrpm[6];
++    aircraft_nvrpm[7] = state.json_nvrpm[7];
++#endif
++
+     frame_counter++;
+ 
+ #if 0
+diff --git a/libraries/SITL/SIM_JSON.h b/libraries/SITL/SIM_JSON.h
+index 048378eae6..f5e1d5e9d6 100644
+--- a/libraries/SITL/SIM_JSON.h
++++ b/libraries/SITL/SIM_JSON.h
+@@ -72,7 +72,12 @@ private:
+     void output_servos(const struct sitl_input &input);
+     void recv_fdm(const struct sitl_input &input);
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    uint64_t parse_sensors(const char *json);
++#else
+     uint32_t parse_sensors(const char *json);
++#endif
++
+ 
+     // buffer for parsing pose data in JSON format
+     uint8_t sensor_buffer[65000];
+@@ -105,8 +110,96 @@ private:
+         } wind_vane_apparent;
+         float airspeed;
+         bool no_time_sync;
++#if AP_SIM_STOCK_SITL_ENABLED
++        uint64_t is_uw[8];
++        float json_nvrpm[8];
++        Vector3d gzposition;
++#endif
+     } state;
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    // table to aid parsing of JSON sensor data
++    struct keytable {
++        const char *section;
++        const char *key;
++        void *ptr;
++        enum data_type type;
++        bool required;
++    } keytable[33] = {
++        { "", "timestamp", &state.timestamp_s, DATA_DOUBLE, true },
++        { "imu", "gyro",    &state.imu.gyro, DATA_VECTOR3F, true },
++        { "imu", "accel_body", &state.imu.accel_body, DATA_VECTOR3F, true },
++        { "", "position", &state.position, DATA_VECTOR3D, true },
++        { "", "attitude", &state.attitude, DATA_VECTOR3F, false },
++        { "", "quaternion", &state.quaternion, QUATERNION, false },
++        { "", "velocity", &state.velocity, DATA_VECTOR3F, true },
++        { "", "rng_1", &state.rng[0], DATA_FLOAT, false },
++        { "", "rng_2", &state.rng[1], DATA_FLOAT, false },
++        { "", "rng_3", &state.rng[2], DATA_FLOAT, false },
++        { "", "rng_4", &state.rng[3], DATA_FLOAT, false },
++        { "", "rng_5", &state.rng[4], DATA_FLOAT, false },
++        { "", "rng_6", &state.rng[5], DATA_FLOAT, false },
++        {"windvane","direction", &state.wind_vane_apparent.direction, DATA_FLOAT, false},
++        {"windvane","speed", &state.wind_vane_apparent.speed, DATA_FLOAT, false},
++        {"", "airspeed", &state.airspeed, DATA_FLOAT, false},
++        {"", "no_time_sync", &state.no_time_sync, BOOLEAN, false},
++        { "", "is_uw_1", &state.is_uw[0], DATA_UINT64, false },
++        { "", "is_uw_2", &state.is_uw[1], DATA_UINT64, false },
++        { "", "is_uw_3", &state.is_uw[2], DATA_UINT64, false },
++        { "", "is_uw_4", &state.is_uw[3], DATA_UINT64, false },
++        { "", "is_uw_5", &state.is_uw[4], DATA_UINT64, false },
++        { "", "is_uw_6", &state.is_uw[5], DATA_UINT64, false },
++        { "", "is_uw_7", &state.is_uw[6], DATA_UINT64, false },
++        { "", "is_uw_8", &state.is_uw[7], DATA_UINT64, false },
++        { "", "rpm_1", &state.json_nvrpm[0], DATA_FLOAT, false },
++        { "", "rpm_2", &state.json_nvrpm[1], DATA_FLOAT, false },
++        { "", "rpm_3", &state.json_nvrpm[2], DATA_FLOAT, false },
++        { "", "rpm_4", &state.json_nvrpm[3], DATA_FLOAT, false },
++        { "", "rpm_5", &state.json_nvrpm[4], DATA_FLOAT, false },
++        { "", "rpm_6", &state.json_nvrpm[5], DATA_FLOAT, false },
++        { "", "rpm_7", &state.json_nvrpm[6], DATA_FLOAT, false },
++        { "", "rpm_8", &state.json_nvrpm[7], DATA_FLOAT, false },
++    };
++
++    // Enum coresponding to the ordering of keys in the keytable.
++    enum DataKey {
++        TIMESTAMP   = 1ULL << 0,
++        GYRO        = 1ULL << 1,
++        ACCEL_BODY  = 1ULL << 2,
++        POSITION    = 1ULL << 3,
++        EULER_ATT   = 1ULL << 4,
++        QUAT_ATT    = 1ULL << 5,
++        VELOCITY    = 1ULL << 6,
++        RNG_1       = 1ULL << 7,
++        RNG_2       = 1ULL << 8,
++        RNG_3       = 1ULL << 9,
++        RNG_4       = 1ULL << 10,
++        RNG_5       = 1ULL << 11,
++        RNG_6       = 1ULL << 12,
++        WIND_DIR    = 1ULL << 13,
++        WIND_SPD    = 1ULL << 14,
++        AIRSPEED    = 1ULL << 15,
++        TIME_SYNC   = 1ULL << 16,
++        NVISUW1     = 1ULL << 17,
++        NVISUW2     = 1ULL << 18,
++        NVISUW3     = 1ULL << 19,
++        NVISUW4     = 1ULL << 20,
++        NVISUW5     = 1ULL << 21,
++        NVISUW6     = 1ULL << 22,
++        NVISUW7     = 1ULL << 23,
++        NVISUW8     = 1ULL << 24,
++        RPM_1       = 1ULL << 25,
++        RPM_2       = 1ULL << 26,
++        RPM_3       = 1ULL << 27,
++        RPM_4       = 1ULL << 28,
++        RPM_5       = 1ULL << 29,
++        RPM_6       = 1ULL << 30,
++        RPM_7       = 1ULL << 31,
++        RPM_8       = 1ULL << 32
++    };
++    uint64_t last_received_bitmask;
++
++#else
+     // table to aid parsing of JSON sensor data
+     struct keytable {
+         const char *section;
+@@ -155,6 +248,9 @@ private:
+         TIME_SYNC   = 1U << 16,
+     };
+     uint32_t last_received_bitmask;
++
++#endif
++
+ };
+ 
+ }
+diff --git a/libraries/SITL/SIM_config.h b/libraries/SITL/SIM_config.h
+index f1ea0c2618..152de29b6e 100644
+--- a/libraries/SITL/SIM_config.h
++++ b/libraries/SITL/SIM_config.h
+@@ -146,6 +146,11 @@
+ #define AP_SIM_GIMBAL_ENABLED (AP_SIM_SOLOGIMBAL_ENABLED)
+ #endif
+ 
++// a way to isolate naviator related sitl changes
++#define AP_SIM_RUN_STOCK_SITL 1
+ #ifndef AP_SIM_NAVIATOR_ENABLED
+-#define AP_SIM_NAVIATOR_ENABLED (CONFIG_HAL_BOARD == HAL_BOARD_SITL)
++#define AP_SIM_NAVIATOR_ENABLED (CONFIG_HAL_BOARD == HAL_BOARD_SITL && !AP_SIM_RUN_STOCK_SITL)
+ #endif
++#ifndef AP_SIM_STOCK_SITL_ENABLED
++#define AP_SIM_STOCK_SITL_ENABLED (CONFIG_HAL_BOARD == HAL_BOARD_SITL && AP_SIM_RUN_STOCK_SITL)
++#endif
+\ No newline at end of file
+diff --git a/libraries/SITL/SITL.cpp b/libraries/SITL/SITL.cpp
+index 1d19c5398b..c71724440e 100644
+--- a/libraries/SITL/SITL.cpp
++++ b/libraries/SITL/SITL.cpp
+@@ -445,17 +445,29 @@ const AP_Param::GroupInfo SIM::var_info2[] = {
+     // @DisplayName: Original Position (Latitude)
+     // @Description: Specifies vehicle's startup latitude
+     // @User: Advanced
++#if AP_SIM_NAVIATOR_ENABLED
+     AP_GROUPINFO("OPOS_LAT",    51, SIM,  opos.lat, -35.363261f),
++#else
++    AP_GROUPINFO("OPOS_LAT",    51, SIM,  opos.lat, 30.176886f),
++#endif
+     // @Param: OPOS_LNG
+     // @DisplayName: Original Position (Longitude)
+     // @Description: Specifies vehicle's startup longitude
+     // @User: Advanced
++#if AP_SIM_NAVIATOR_ENABLED
+     AP_GROUPINFO("OPOS_LNG",    52, SIM,  opos.lng, 149.165230f),
++#else
++    AP_GROUPINFO("OPOS_LNG",    52, SIM,  opos.lng, -85.735253f),
++#endif
+     // @Param: OPOS_ALT
+     // @DisplayName: Original Position (Altitude)
+     // @Description: Specifies vehicle's startup altitude (AMSL)
+     // @User: Advanced
++#if AP_SIM_NAVIATOR_ENABLED
+     AP_GROUPINFO("OPOS_ALT",    53, SIM,  opos.alt, 584.0f),
++#else
++    AP_GROUPINFO("OPOS_ALT",    53, SIM,  opos.alt, 0.0f),
++#endif
+     // @Param: OPOS_HDG
+     // @DisplayName: Original Position (Heading)
+     // @Description: Specifies vehicle's startup heading (0-360)
+diff --git a/libraries/SITL/SITL.h b/libraries/SITL/SITL.h
+index 4d587c8dd7..8b22f9c0d8 100644
+--- a/libraries/SITL/SITL.h
++++ b/libraries/SITL/SITL.h
+@@ -52,7 +52,10 @@ struct float_array {
+ class StratoBlimp;
+ class Glider;
+ class FlightAxis;
++
++#if AP_SIM_NAVIATOR_ENABLED
+ class Naviator;
++#endif
+ 
+ struct sitl_fdm {
+     // this is the structure passed between FDM models and the main SITL code
+@@ -100,6 +103,12 @@ struct sitl_fdm {
+     // earthframe wind, from backends that know it
+     Vector3f wind_ef;
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    uint64_t is_uw[8];
++    float nvrpm[8];
++    Vector3d gzposition;
++#endif
++
+     // AGL altitude, usually derived from the terrain database in simulation:
+     float height_agl;
+ 
+@@ -215,6 +224,11 @@ public:
+     AP_Vector3f gps_vel_err[2]; // Velocity error offsets in NED (x = N, y = E, z = D)
+     AP_Int8 gps_jam[2]; // jamming simulation enable
+ 
++#if AP_SIM_STOCK_SITL_ENABLED
++    float gps_hdop = 121;
++    float gps_vdop = 200;
++#endif
++
+     // initial offset on GPS lat/lon, used to shift origin
+     AP_Float gps_init_lat_ofs;
+     AP_Float gps_init_lon_ofs;
