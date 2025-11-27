@@ -1,5 +1,5 @@
-# unset PYTHONPATH
-# unset PYTHONHOME
+unset PYTHONPATH
+unset PYTHONHOME
 ## venv here and then:
 
 filename = "watcher.py"
