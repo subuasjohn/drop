@@ -1,5 +1,9 @@
 unset PYTHONPATH
 unset PYTHONHOME
+
+# in .bashrc
+alias pyClear='unset PYTHONPATH'
+
 ## venv here and then:
 
 filename = "watcher.py"
